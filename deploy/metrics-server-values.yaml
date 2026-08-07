@@ -1,0 +1,7 @@
+# kind's kubelets serve metrics with self-signed certs that aren't in the
+# cluster CA, so metrics-server must skip kubelet cert verification.
+args:
+  - --kubelet-insecure-tls
+  - --kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP
+  # Shorter scrape interval so the visualizer reacts to load faster.
+  - --metric-resolution=15s

@@ -1,0 +1,114 @@
+# OpenTelemetry Demo, trimmed for a laptop kind cluster.
+#
+# Two deliberate changes from the chart defaults:
+#
+#  1. The bundled observability stack (Jaeger/Prometheus/Grafana/OpenSearch/
+#     eBPF profiler) is disabled. This project *is* the observability view, and
+#     that stack costs several GiB we don't have.
+#
+#  2. The built-in load-generator is disabled. Baseline traffic must be quiet so
+#     that starting k6 during the demo produces a visible change on the canvas.
+#     If the loadgen ran continuously, pods would already be lit up at t=0.
+#
+# CPU *requests* are set below (no CPU limits) so that "CPU as a fraction of
+# request" is a well-defined overload signal. The chart ships memory limits but
+# no CPU resources at all, which would leave that signal undefined. Requests
+# rather than limits so the services are never CFS-throttled mid-demo.
+
+opentelemetry-collector:
+  enabled: true
+jaeger:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false
+otel-ebpf-profiler:
+  enabled: false
+
+components:
+  # --- disabled: heavy or not needed for the traffic topology we visualize ---
+  load-generator:
+    enabled: false
+  kafka:
+    enabled: false
+  accounting:
+    enabled: false      # consumes from kafka
+  fraud-detection:
+    enabled: false      # consumes from kafka
+  checkout:
+    enabled: false      # has an init container that blocks on kafka:9092
+  chatbot:
+    enabled: false      # requires an external LLM API key
+  agent:
+    enabled: false
+  mcp:
+    enabled: false
+  telemetry-docs:
+    enabled: false
+  opamp-server:
+    enabled: false
+
+  # --- kept: the request-path services that make an interesting topology ---
+  # resources.requests.cpu deep-merges with each component's default
+  # resources.limits.memory from the chart.
+  frontend:
+    resources:
+      requests:
+        cpu: 50m
+  frontend-proxy:
+    resources:
+      requests:
+        cpu: 50m
+  product-catalog:
+    resources:
+      requests:
+        cpu: 50m
+  recommendation:
+    resources:
+      requests:
+        cpu: 50m
+  ad:
+    resources:
+      requests:
+        cpu: 50m
+  cart:
+    resources:
+      requests:
+        cpu: 50m
+  currency:
+    resources:
+      requests:
+        cpu: 50m
+  shipping:
+    resources:
+      requests:
+        cpu: 50m
+  quote:
+    resources:
+      requests:
+        cpu: 50m
+  payment:
+    resources:
+      requests:
+        cpu: 50m
+  email:
+    resources:
+      requests:
+        cpu: 50m
+  image-provider:
+    resources:
+      requests:
+        cpu: 50m
+  # Measured under load: astronomy-db 677m, flagd 152m. Both are real
+  # participants in the request path, so they get a request and can blink.
+  astronomy-db:
+    resources:
+      requests:
+        cpu: 50m
+  flagd:
+    resources:
+      requests:
+        cpu: 50m

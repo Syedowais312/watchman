@@ -1,0 +1,47 @@
+# Runs the k6 ramp inside the cluster.
+#
+# kubectl port-forward is a single-process TCP proxy: at 60 VUs it dropped 18%
+# of requests and the load never reached the backends, so the "pods light up"
+# moment never fired. Running k6 as a pod removes that bottleneck and is also
+# the more realistic traffic path — it enters through frontend-proxy exactly as
+# in-cluster clients would.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+  namespace: otel-demo
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: k6-load
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:2.1.0
+          imagePullPolicy: IfNotPresent
+          # The script is piped in on stdin rather than passed as a path.
+          # Given a file path, k6 registers an fsnotify watcher, and this host
+          # has fs.inotify.max_user_instances=128 (kind recommends 512) which is
+          # already exhausted by containerd/kubelet — so k6 died at startup with
+          # "failed to create fsnotify watcher: too many open files".
+          # Reading from stdin skips the watcher entirely and needs no sysctl
+          # change on the host.
+          command: ["sh", "-c", "exec k6 run - < /scripts/browse.js"]
+          env:
+            - name: BASE
+              value: http://frontend-proxy:8080
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: k6-script

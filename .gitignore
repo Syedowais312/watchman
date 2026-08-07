@@ -1,0 +1,33 @@
+# Go
+aggregator/aggregator
+aggregator/aggregator.exe
+*.test
+*.out
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.sw?
+
+# Claude config (local machine settings)
+.claude/
+
+# Helm chart tarballs
+deploy/*.tgz
+
+# Screenshots / temp artifacts
+frontend/*.png
+*.tmp

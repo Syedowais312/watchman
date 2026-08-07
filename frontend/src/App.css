@@ -1,0 +1,271 @@
+@font-face {
+  font-family: 'Press Start 2P';
+  src: url('/fonts/press-start-2p.woff2') format('woff2');
+  font-display: swap;
+  font-weight: 400;
+}
+
+:root {
+  --cream: #f5e9cc;
+  --panel: #fffbef;
+  --ink: #14110c;
+  --ink-soft: #7a7060;
+  --accent: #ffc93c;
+  --critical: #e23b3b;
+  --good: #10b981;
+  --blue: #3b82f6;
+  --orange: #f97316;
+  --pixel: 'Press Start 2P', ui-monospace, monospace;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font: 13px/1.5 var(--mono);
+  -webkit-font-smoothing: none;
+}
+
+.app { display: flex; flex-direction: column; height: 100%; }
+
+/* The shared neo-brutalist primitive: solid fill, heavy border, hard shadow. */
+.slab {
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  background: var(--panel);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 18px 14px;
+  background: var(--panel);
+  border-bottom: 4px solid var(--ink);
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--pixel);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.logo {
+  width: 14px;
+  height: 14px;
+  background: var(--blue);
+  border: 3px solid var(--ink);
+  box-shadow: 6px 0 0 var(--orange), 6px 0 0 3px var(--ink),
+              0 6px 0 var(--good), 0 6px 0 3px var(--ink);
+  margin-right: 8px;
+}
+
+.brand .sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0;
+  margin-left: 10px;
+}
+
+.legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  padding: 4px 9px;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.swatch {
+  width: 11px;
+  height: 11px;
+  display: inline-block;
+  border: 2px solid var(--ink);
+}
+
+.swatch-overload { background: var(--critical); }
+
+.right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+
+.status, .load {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  background: var(--panel);
+  font-family: var(--pixel);
+  font-size: 8px;
+  letter-spacing: 0.03em;
+}
+
+.dot { width: 9px; height: 9px; display: inline-block; border: 2px solid var(--ink); background: #cfc4a8; }
+.status.ok .dot { background: var(--good); }
+.status.bad { background: var(--critical); color: #fff; }
+.status.bad .dot { background: #fff; }
+
+.load-idle { color: var(--ink-soft); }
+.load-active { background: var(--accent); }
+.load-active .dot { background: var(--orange); }
+.load-heavy { background: var(--critical); color: #fff; }
+.load-heavy .dot { background: #fff; }
+/* Pulse is a redundant cue on top of colour + text, never the only signal. */
+.load-heavy { animation: pulse 0.65s steps(2, end) infinite; }
+@keyframes pulse { 50% { box-shadow: 3px 3px 0 var(--ink), 0 0 0 4px rgba(226,59,59,0.35); } }
+
+.statbar {
+  display: flex;
+  gap: 10px;
+  padding: 10px 18px;
+  background: var(--cream);
+  border-bottom: 3px solid var(--ink);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.stat {
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  padding: 5px 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.stat b { font-family: var(--pixel); font-size: 11px; }
+.stat.alarm { background: var(--critical); color: #fff; }
+.stat .muted { color: var(--ink-soft); }
+.stat.alarm .muted { color: #ffd9d9; }
+
+.hint { margin-left: auto; font-size: 11px; color: var(--ink-soft); }
+
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+
+.pixel-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  image-rendering: pixelated;
+}
+
+.panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 320px;
+  background: var(--panel);
+  border: 4px solid var(--ink);
+  box-shadow: 7px 7px 0 var(--ink);
+  padding: 0 0 12px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 3px solid var(--ink);
+  background: var(--accent);
+}
+
+.panel-head strong { font-family: var(--pixel); font-size: 10px; line-height: 1.4; }
+
+.close {
+  margin-left: auto;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px 4px;
+  font-family: var(--pixel);
+}
+.close:active { transform: translate(2px, 2px); box-shadow: none; }
+
+.alert {
+  margin: 12px 12px 0;
+  background: var(--critical);
+  color: #fff;
+  padding: 8px 10px;
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  font-family: var(--pixel);
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.panel dl {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 6px 10px;
+  margin: 12px 14px 0;
+}
+
+.panel dt { color: var(--ink-soft); font-size: 11px; }
+.panel dd { margin: 0; font-size: 12px; }
+.mono { font-variant-numeric: tabular-nums; }
+.wrap { overflow-wrap: anywhere; }
+
+.bar {
+  grid-column: 1 / -1;
+  height: 14px;
+  background: #e7d9b6;
+  border: 3px solid var(--ink);
+  position: relative;
+  margin-top: 2px;
+}
+.bar i { display: block; height: 100%; background: var(--good); }
+.bar.hot i { background: var(--accent); }
+.bar.over i { background: var(--critical); }
+.bar span {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  font-size: 8px;
+  font-family: var(--pixel);
+  line-height: 8px;
+  color: var(--ink);
+}
+
+.foot {
+  margin: 12px 14px 0;
+  padding-top: 9px;
+  border-top: 3px solid var(--ink);
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.toggle {
+  font-family: var(--pixel);
+  font-size: 8px;
+  padding: 6px 9px;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  cursor: pointer;
+  color: var(--ink);
+}
+.toggle.on { background: var(--accent); }
+.toggle:active { transform: translate(3px, 3px); box-shadow: none; }
+
+.panel dd.small { font-size: 10px; white-space: pre-line; line-height: 1.35; }
