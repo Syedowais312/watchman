@@ -10,7 +10,8 @@ mocked data anywhere in the wired path.
 ```
 Kubernetes API (watch)  ──┐
 metrics-server API      ──┼──▶  Go aggregator (in-memory)  ──▶  WebSocket ──▶  pixel canvas
-Hubble Relay (GetFlows) ──┘
+Hubble Relay (GetFlows) ──┘                │
+                                           └──▶  Claude (Haiku 4.5)  ──▶  chat panel
 ```
 
 k6 generates **real HTTP traffic against the real app** — it never injects
@@ -93,6 +94,32 @@ Change it without touching code:
 ```
 
 The UI reads the threshold from the server's snapshot, so it never hardcodes it.
+
+---
+
+## Asking Watchman questions
+
+The chat panel answers from the **measured overload-event log only** — the same
+log the canvas draws from. Ask it "did product-catalog overload?" and it replies
+with the peak value, the wall-clock time, and how long the incident lasted.
+
+**Claude Haiku 4.5 is the reasoning layer.** The aggregator exposes
+`POST /api/chat`, which hands Claude the real event log as JSON along with a
+system prompt that forbids inventing a service, a number, or an incident. The
+API key is read from `ANTHROPIC_API_KEY` server-side and never reaches the
+browser. Haiku rather than a larger model because the task is grounded
+fact-lookup over a small JSON payload, not open-ended reasoning.
+
+Grounding is the whole point: with an empty log, asking whether a service
+overloaded returns *"The event log is empty, so I cannot determine whether
+product-catalog overloaded"* — not a plausible-sounding fabrication.
+
+```bash
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env    # gitignored; dev.sh sources it
+```
+
+Without a key the panel falls back to a rule-based matcher over the same log, so
+the demo still answers offline — it just can't handle paraphrases.
 
 ---
 
@@ -209,15 +236,18 @@ OTel Demo chart 0.41.0 (app 3.0.0), k6 2.1.0, Helm 3.21.3, Go 1.26.
 
 ```
 aggregator/     Go service: pod watch, metrics polling, Hubble stream, WebSocket
-  state.go      merged in-memory state + rolling windows
+  state.go      merged in-memory state + rolling windows + overload event log
   k8s.go        client-go shared informer
   metrics.go    metrics-server polling
   hubble.go     Hubble Relay GetFlows subscription
+  claude.go     Claude Haiku 4.5 call, grounded in the event log
   ws.go         snapshot-on-connect, then diffs
 frontend/       Vite + React shell around a plain-canvas renderer
   topology.ts   service aggregation + hand-authored positions + observed edges
   renderer.ts   the rAF draw loop (no React)
   store.ts      mutable store the WebSocket mutates directly
+  Watchman.tsx  the pixel-mascot chat panel
+  chat.ts       Claude call + rule-based fallback, both over /api/events
 load/browse.js  k6 ramp
 deploy/         cluster values, k6 Job, helper scripts
 ```

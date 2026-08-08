@@ -107,6 +107,8 @@ func main() {
 		go logMergedState(ctx, st)
 	}
 
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", hub.ServeWS)
 	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +121,31 @@ func main() {
 		if err := json.NewEncoder(w).Encode(st.Events()); err != nil {
 			log.Printf("events: encode: %v", err)
 		}
+	})
+	mux.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
+		if !cors(w, r) {
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Question string `json:"question"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		reply, err := AskClaude(r.Context(), anthropicKey, body.Question, st.Events())
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			log.Printf("chat: claude: %v", err)
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"reply": reply})
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok flows=%d clients=%d\n", flowsSeen.Load(), hub.ClientCount())

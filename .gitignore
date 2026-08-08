@@ -25,7 +25,7 @@ yarn-error.log*
 # Claude config (local machine settings)
 .claude/
 
-# Local secrets (GROQ_API_KEY lives here, never committed)
+# Local secrets (ANTHROPIC_API_KEY lives here, never committed)
 .env
 
 # Helm chart tarballs

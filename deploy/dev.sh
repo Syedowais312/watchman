@@ -11,7 +11,7 @@
 export PATH="/usr/local/go/bin:$HOME/.local/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Optional local secrets (GROQ_API_KEY) — never committed.
+# Optional local secrets (ANTHROPIC_API_KEY) — never committed.
 if [ -f "$ROOT/.env" ]; then
   set -a; . "$ROOT/.env"; set +a
 fi

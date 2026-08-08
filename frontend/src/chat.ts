@@ -1,10 +1,16 @@
 import { store } from './store';
 
 /**
- * Watchman's brain. Deliberately NOT an LLM and NOT networked to anything
- * external: every reply is assembled from the aggregator's /api/events log, so
- * Watchman can only ever state facts it actually recorded. If nothing matches,
- * it says so instead of guessing.
+ * Watchman's brain. Two tiers, both grounded in the aggregator's /api/events
+ * log so Watchman can only ever state facts it actually recorded:
+ *
+ *   1. Claude (Haiku 4.5), proxied through the aggregator's /api/chat so the
+ *      API key never reaches the browser. The aggregator hands Claude the real
+ *      event log and instructs it never to invent data.
+ *   2. A rule-based matcher, used when the key isn't configured or the call
+ *      fails, so the demo still answers offline.
+ *
+ * Either way, no data matched means an honest "I don't have that", never a guess.
  */
 
 export interface ChatEvent {
@@ -18,6 +24,7 @@ export interface ChatEvent {
 }
 
 const API = `http://${window.location.hostname}:8090/api/events`;
+const CHAT_API = `http://${window.location.hostname}:8090/api/chat`;
 
 export async function fetchEvents(): Promise<ChatEvent[]> {
   try {
@@ -30,11 +37,26 @@ export async function fetchEvents(): Promise<ChatEvent[]> {
 }
 
 /**
- * Ask the LLM (Groq, proxied server-side so the key never reaches the browser).
+ * Ask Claude, proxied server-side so the API key never reaches the browser.
  * The aggregator grounds it in the real event log and tells it never to invent
  * data. Returns null when the key isn't configured or the call fails, so the
  * caller can fall back to the offline rule-based matcher.
  */
+export async function askClaude(question: string): Promise<string | null> {
+  try {
+    const res = await fetch(CHAT_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { reply?: string };
+    return data.reply?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function knownServices(): string[] {
   const s = new Set<string>();
   for (const p of store.pods.values()) s.add(p.component);

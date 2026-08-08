@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { answerQuestion, fetchEvents, knownServices, type ChatEvent } from './chat';
+import { answerQuestion, askClaude, fetchEvents, knownServices, type ChatEvent } from './chat';
 
 interface Msg {
   role: 'user' | 'watchman';
@@ -74,10 +74,11 @@ export function Watchman() {
     setBusy(true);
     const fresh = await fetchEvents();
     setEvents(fresh);
-    // Rule-based only: no LLM call, no external network. Every reply is
+    // Claude first, grounded server-side in `fresh`; the rule-based matcher is
+    // the fallback when the key isn't configured or the call fails. Both are
     // templated from events the aggregator actually logged, so Watchman can't
     // invent a service, a number, or an incident that never happened.
-    const reply = answerQuestion(q, fresh, knownServices());
+    const reply = (await askClaude(q)) ?? answerQuestion(q, fresh, knownServices());
     setMsgs((m) => [...m, { role: 'watchman', text: reply }]);
     setBusy(false);
   };
