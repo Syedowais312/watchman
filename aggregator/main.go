@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -34,6 +35,20 @@ func kubeConfig(explicit string) (*rest.Config, error) {
 		}
 	}
 	return clientcmd.BuildConfigFromFlags("", path)
+}
+
+// cors sets the local-dev CORS headers for /api/events, which the chat fetches
+// from the Vite dev server on a different port. Returns false if the request
+// was already fully handled (the OPTIONS preflight).
+func cors(w http.ResponseWriter, r *http.Request) bool {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r != nil && r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return false
+	}
+	return true
 }
 
 func main() {
@@ -94,6 +109,17 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", hub.ServeWS)
+	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
+		// The Vite dev server runs on :5173, so the chat's on-demand fetch is a
+		// cross-origin request. Local demo tool: allow any origin.
+		if !cors(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(st.Events()); err != nil {
+			log.Printf("events: encode: %v", err)
+		}
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok flows=%d clients=%d\n", flowsSeen.Load(), hub.ClientCount())
 	})

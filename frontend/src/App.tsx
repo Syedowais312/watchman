@@ -16,6 +16,7 @@ import {
   sandbox,
   setReplicas,
 } from './sandbox';
+import { Watchman } from './Watchman';
 import './App.css';
 
 const WS_URL = `ws://${window.location.hostname}:8090/ws`;
@@ -362,6 +363,8 @@ export default function App() {
           </aside>
         )}
       </main>
+
+      <Watchman />
     </div>
   );
 }

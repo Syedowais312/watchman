@@ -45,12 +45,16 @@ const topologyListeners = new Set<TopologyListener>();
 
 export function onStatus(fn: StatusListener) {
   statusListeners.add(fn);
-  return () => statusListeners.delete(fn);
+  return () => {
+    statusListeners.delete(fn);
+  };
 }
 
 export function onTopology(fn: TopologyListener) {
   topologyListeners.add(fn);
-  return () => topologyListeners.delete(fn);
+  return () => {
+    topologyListeners.delete(fn);
+  };
 }
 
 function setConnected(v: boolean) {

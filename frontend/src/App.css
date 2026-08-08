@@ -388,3 +388,168 @@ body {
 
 .step-value { font-size: 14px; min-width: 22px; text-align: center; }
 .step-note { font-size: 10px; margin-left: auto; }
+
+/* --- Watchman mascot + chat ---------------------------------------------- */
+
+.watchman {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.watchman-sprite {
+  padding: 10px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  box-shadow: 5px 5px 0 var(--ink);
+  cursor: pointer;
+  position: relative;
+  line-height: 0;
+  image-rendering: pixelated;
+}
+.watchman-sprite:hover { background: var(--cream); }
+.watchman-sprite:active { transform: translate(2px, 2px); box-shadow: 3px 3px 0 var(--ink); }
+
+.wm-row { height: 6px; }
+.wm-px {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  background: transparent;
+}
+
+/* Idle bounce so the mascot reads as alive, not a static sticker. */
+@keyframes wm-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+.watchman-sprite { animation: wm-idle 2.4s steps(2, end) infinite; }
+.watchman-sprite:hover { animation-play-state: paused; }
+
+/* Thinking dots while Watchman waits on the LLM. */
+.msg.typing {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.msg.typing i {
+  width: 6px;
+  height: 6px;
+  background: var(--ink);
+  animation: wm-typing 0.9s steps(2, end) infinite;
+}
+.msg.typing i:nth-child(2) { animation-delay: 0.15s; }
+.msg.typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes wm-typing {
+  50% { opacity: 0.2; }
+}
+
+/* Role classes are msg-watchman / msg-user, deliberately NOT "watchman":
+   a bubble with class "watchman" also matches the fixed-position .watchman
+   container rule above and gets pinned to the viewport corner. */
+
+/* Alert badge: only present when an overload event is active or very recent. */
+.watchman-badge {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 22px;
+  height: 22px;
+  background: var(--critical);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  color: #fff;
+  font-family: var(--pixel);
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  animation: pulse 0.65s steps(2, end) infinite;
+  z-index: 2;
+}
+
+.watchman-chat {
+  width: 300px;
+  background: var(--panel);
+  border: 4px solid var(--ink);
+  box-shadow: 7px 7px 0 var(--ink);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.watchman-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 3px solid var(--ink);
+  background: var(--accent);
+  font-family: var(--pixel);
+  font-size: 10px;
+}
+
+.watchman-msgs {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msg {
+  padding: 7px 9px;
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 92%;
+  overflow-wrap: anywhere;
+}
+
+.msg-watchman {
+  align-self: flex-start;
+  background: var(--cream);
+}
+
+.msg-user {
+  align-self: flex-end;
+  background: var(--blue);
+  color: #fff;
+}
+
+.watchman-input {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 3px solid var(--ink);
+  background: var(--cream);
+}
+
+.watchman-input input {
+  flex: 1;
+  font: inherit;
+  padding: 6px 8px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+  min-width: 0;
+}
+
+.watchman-input button {
+  font-family: var(--pixel);
+  font-size: 10px;
+  padding: 4px 10px;
+  border: 3px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  background: var(--accent);
+  cursor: pointer;
+  color: var(--ink);
+}
+.watchman-input button:active { transform: translate(2px, 2px); box-shadow: none; }
+.watchman-input button:disabled { opacity: 0.5; cursor: default; }

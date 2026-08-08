@@ -94,6 +94,24 @@ type edgeState struct {
 	count ring
 }
 
+// maxEvents caps the overload event log. It's a ring in spirit: the oldest
+// events are pruned once the cap is reached, so the chat only ever answers
+// from what's still on screen.
+const maxEvents = 200
+
+// OverloadEvent is one service's crossing of the overload threshold, recorded
+// when the state tick observes the transition. start_time/end_time are unix
+// seconds; end_time stays null while the overload is ongoing.
+type OverloadEvent struct {
+	Service   string  `json:"service"`
+	Metric    string  `json:"metric"`
+	PeakValue float64 `json:"peak_value"` // peak CPU as % of request (or flows/s for rate)
+	StartTime int64   `json:"start_time"`
+	EndTime   *int64  `json:"end_time,omitempty"`
+	Duration  float64 `json:"duration"` // seconds, grows while active
+	Active    bool    `json:"active"`
+}
+
 // State is the whole in-memory world. No persistence: everything here is a
 // rolling window over live data.
 type State struct {
@@ -105,6 +123,10 @@ type State struct {
 	overloadSignal    string // "cpu" or "rate"
 	cpuPctThreshold   float64
 	flowRateThreshold float64
+
+	// Overload event log, keyed by service so an ongoing event is a single
+	// object that PeakValue/Duration grow into.
+	events map[string]*OverloadEvent
 }
 
 func NewState(signal string, cpuPct, flowRate float64) *State {
@@ -114,6 +136,7 @@ func NewState(signal string, cpuPct, flowRate float64) *State {
 		overloadSignal:    signal,
 		cpuPctThreshold:   cpuPct,
 		flowRateThreshold: flowRate,
+		events:            map[string]*OverloadEvent{},
 	}
 }
 
@@ -250,17 +273,28 @@ type OverloadCfg struct {
 	FlowRate      float64 `json:"flowRate"`
 }
 
-func (s *State) overloadedLocked(p *PodState, now int64) bool {
+// exceedsLocked is the single overload comparison in the backend. Both the
+// per-pod colouring signal and the per-service event log go through it, so the
+// thing the chat reports an incident for is by construction the same thing that
+// turned the node red — they can't drift apart.
+//
+// Returns whether the threshold is crossed, plus the value that was compared
+// (so the event log can record the peak without recomputing it).
+func (s *State) exceedsLocked(cpuPct, rxRate float64) (bool, float64) {
 	switch s.overloadSignal {
 	case "rate":
-		return p.rx.rate(now) >= s.flowRateThreshold
+		return rxRate >= s.flowRateThreshold, rxRate
 	default: // "cpu"
-		pct := p.cpuPct()
-		if pct < 0 {
-			return false // no CPU request -> signal undefined, never blink
+		if cpuPct < 0 {
+			return false, cpuPct // no CPU request -> signal undefined, never blink
 		}
-		return pct >= s.cpuPctThreshold
+		return cpuPct >= s.cpuPctThreshold, cpuPct
 	}
+}
+
+func (s *State) overloadedLocked(p *PodState, now int64) bool {
+	on, _ := s.exceedsLocked(p.cpuPct(), p.rx.rate(now))
+	return on
 }
 
 // View materialises the current merged state as wire types.
@@ -268,6 +302,8 @@ func (s *State) View() ([]PodView, []EdgeView, []string) {
 	now := time.Now().Unix()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.tickEventsLocked(now)
 
 	pods := make([]PodView, 0, len(s.pods))
 	nsSet := map[string]struct{}{}
@@ -326,4 +362,106 @@ func (s *State) View() ([]PodView, []EdgeView, []string) {
 
 func (s *State) Config() OverloadCfg {
 	return OverloadCfg{Signal: s.overloadSignal, CPUPct: s.cpuPctThreshold, FlowRate: s.flowRateThreshold}
+}
+
+// tickEventsLocked records overload crossings into the event log. It reuses
+// the same threshold/ratio maths that drives node colouring, but at service
+// level (summed across the service's pods), matching what the canvas shows.
+// Must be called with s.mu held.
+func (s *State) tickEventsLocked(now int64) {
+	agg := map[string]*svcAgg{}
+	for _, p := range s.pods {
+		a := agg[p.Component]
+		if a == nil {
+			a = &svcAgg{}
+			agg[p.Component] = a
+		}
+		a.cpuMilli += p.CPUMilli
+		a.reqMilli += p.CPUReqMilli
+		a.rxRate += p.rx.rate(now)
+	}
+
+	// Aggregate CPU% for the service, or -1 when no replica sets a CPU request
+	// (the same "undefined, never blink" convention the per-pod path uses).
+	svcCPUPct := func(a *svcAgg) float64 {
+		if a.reqMilli <= 0 {
+			return -1
+		}
+		return float64(a.cpuMilli) / float64(a.reqMilli) * 100
+	}
+
+	for key, a := range agg {
+		on, val := s.exceedsLocked(svcCPUPct(a), a.rxRate)
+		ev, ok := s.events[key]
+		switch {
+		case on && !ok:
+			s.events[key] = &OverloadEvent{
+				Service:   key,
+				Metric:    s.overloadSignal,
+				PeakValue: val,
+				StartTime: now,
+				Duration:  0,
+				Active:    true,
+			}
+		case on && ok:
+			if val > ev.PeakValue {
+				ev.PeakValue = val
+			}
+			ev.Duration = float64(now - ev.StartTime)
+		case !on && ok && ev.Active:
+			end := now
+			ev.EndTime = &end
+			ev.Duration = float64(end - ev.StartTime)
+			ev.Active = false
+		}
+	}
+
+	// A service that vanished (all pods gone) while overloaded must close.
+	for key, ev := range s.events {
+		if ev.Active {
+			if _, present := agg[key]; !present {
+				end := now
+				ev.EndTime = &end
+				ev.Duration = float64(end - ev.StartTime)
+				ev.Active = false
+			}
+		}
+	}
+
+	// Prune oldest beyond the cap so the log stays a bounded ring.
+	for len(s.events) > maxEvents {
+		oldest, oldKey := now, ""
+		for k, ev := range s.events {
+			if ev.StartTime <= oldest {
+				oldest, oldKey = ev.StartTime, k
+			}
+		}
+		delete(s.events, oldKey)
+	}
+}
+
+// svcAgg is the per-service accumulation used by tickEventsLocked.
+type svcAgg struct {
+	cpuMilli int64
+	reqMilli int64
+	rxRate   float64
+}
+
+// Events returns the overload event log, newest first (active events first),
+// as value copies so callers can't mutate shared state.
+func (s *State) Events() []OverloadEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]OverloadEvent, 0, len(s.events))
+	for _, ev := range s.events {
+		out = append(out, *ev)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Active != out[j].Active {
+			return out[i].Active
+		}
+		return out[i].StartTime > out[j].StartTime
+	})
+	return out
 }
