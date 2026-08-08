@@ -320,3 +320,71 @@ body {
   color: var(--critical);
 }
 .replica.over .replica-warn { color: #fff; }
+
+/* --- sandbox mode ------------------------------------------------------- */
+/* Dashed everywhere, so a projected view is never mistaken for a measured one. */
+.sandbox-btn.on { background: var(--blue); color: #fff; border-style: dashed; }
+
+.sandbox-load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.rps {
+  width: 74px;
+  font: inherit;
+  font-family: var(--mono);
+  padding: 4px 6px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.bottleneck {
+  background: var(--critical);
+  color: #fff;
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.ghost-tag {
+  font-family: var(--pixel);
+  font-size: 7px;
+  border: 2px dashed var(--ink);
+  padding: 3px 5px;
+  margin-left: 6px;
+}
+
+.stepper-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 0;
+  padding: 8px;
+  border: 3px dashed var(--ink);
+  background: var(--cream);
+}
+
+.stepper-label { font-family: var(--pixel); font-size: 8px; }
+
+.step {
+  font-family: var(--pixel);
+  font-size: 11px;
+  width: 26px;
+  height: 24px;
+  border: 3px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  background: var(--panel);
+  cursor: pointer;
+  color: var(--ink);
+  line-height: 1;
+}
+.step:active { transform: translate(2px, 2px); box-shadow: none; }
+
+.step-value { font-size: 14px; min-width: 22px; text-align: center; }
+.step-note { font-size: 10px; margin-left: auto; }

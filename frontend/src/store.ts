@@ -1,3 +1,4 @@
+import { sandbox } from './sandbox';
 import type { EdgeView, OverloadCfg, PodView, ServerMsg } from './types';
 
 /**
@@ -65,6 +66,11 @@ function bumpTopology() {
 }
 
 function apply(msg: ServerMsg) {
+  // Sandbox freezes the graph: live updates are dropped on the floor rather
+  // than buffered, so what's on screen stays exactly the snapshot the user
+  // started editing. The socket stays open so "back to live" resumes instantly.
+  if (sandbox.active) return;
+
   store.lastMessageAt = performance.now();
 
   if (msg.type === 'snapshot') {

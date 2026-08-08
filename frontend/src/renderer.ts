@@ -1,3 +1,4 @@
+import { project, sandbox } from './sandbox';
 import { store } from './store';
 import {
   aggregateServices,
@@ -5,6 +6,7 @@ import {
   hitTestNodes,
   NODE_H,
   NODE_W,
+  loadRatio,
   neighborsOf,
   serviceKeyOf,
   updateEdges,
@@ -33,6 +35,9 @@ const CREAM_DOT = '#eaddb9';
 const PANEL = '#fffbef';
 const INK = '#14110c';
 const INK_SOFT = '#7a7060';
+
+/** Traffic enters the demo app here; the sandbox propagates load from it. */
+export const ENTRY_KEY = 'otel-demo/frontend-proxy';
 
 const PIXEL_FONT = '"Press Start 2P", ui-monospace, monospace';
 const LABEL_FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -130,13 +135,28 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
   /** Selected node plus everything it talks to, for the highlight pass. */
   let relatedNodes = new Set<string>();
 
+  /** Edges to draw and animate: live observed ones, or the frozen sandbox set. */
+  let activeEdges: ReturnType<typeof visibleEdges> = [];
+
   function rebuild() {
     const thresh = store.overloadCfg.cpuPct || 200;
-    nodes = aggregateServices([...store.pods.values()], thresh, showKubeSystem);
 
-    const podToService = new Map<string, string>();
-    for (const p of store.pods.values()) podToService.set(p.key, serviceKeyOf(p));
-    updateEdges(store.edges, podToService);
+    if (sandbox.active) {
+      // Frozen snapshot re-projected for the current stepper / test-load
+      // values. Node cpuPct and overload are filled in by the projection using
+      // the same threshold function the live path uses, so drawNode needs no
+      // sandbox-specific branches to colour them.
+      const p = project(thresh, ENTRY_KEY);
+      nodes = p.nodes;
+      activeEdges = p.edges.filter((e) => nodes.has(e.src) && nodes.has(e.dst));
+    } else {
+      nodes = aggregateServices([...store.pods.values()], thresh, showKubeSystem);
+
+      const podToService = new Map<string, string>();
+      for (const p of store.pods.values()) podToService.set(p.key, serviceKeyOf(p));
+      updateEdges(store.edges, podToService);
+      activeEdges = visibleEdges(nodes);
+    }
 
     relatedNodes = new Set<string>();
     if (selected) {
@@ -177,7 +197,9 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
   }
 
   function spawnPackets(dt: number) {
-    for (const e of visibleEdges(nodes)) {
+    // Identical code path for real and synthetic traffic: only the source of
+    // e.rate differs (Hubble stream vs sandbox projection).
+    for (const e of activeEdges) {
       if (e.rate <= 0) continue;
       const a = nodes.get(e.src);
       const b = nodes.get(e.dst);
@@ -232,7 +254,7 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
   }
 
   function drawEdges() {
-    for (const e of visibleEdges(nodes)) {
+    for (const e of activeEdges) {
       const a = nodes.get(e.src)!;
       const b = nodes.get(e.dst)!;
       const g = edgeGeometry(a, b);
@@ -263,10 +285,12 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
 
       ctx.strokeStyle = `rgba(20,17,12,${alpha})`;
       ctx.lineWidth = width;
+      if (sandbox.active) ctx.setLineDash([6, 4]);
       ctx.beginPath();
       ctx.moveTo(g.sx, g.sy);
       ctx.lineTo(lineEndX, lineEndY);
       ctx.stroke();
+      ctx.setLineDash([]);
 
       // Arrowhead, tip exactly on the destination border.
       const halfW = related && selected ? 5 : 4;
@@ -282,7 +306,7 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
 
   function drawNode(n: ServiceNode, now: number) {
     const thresh = store.overloadCfg.cpuPct || 200;
-    const ratio = n.cpuPct >= 0 ? n.cpuPct / thresh : 0;
+    const ratio = loadRatio(n.cpuPct, thresh);
     const seed = hash(n.key);
 
     const b = bump.get(n.key) ?? 0;
@@ -302,7 +326,20 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
     // Secondary non-colour cue: the border thickens with load, so magnitude is
     // legible in greyscale and for colour-blind viewers.
     const border = n.overload ? 5 : ratio > 0.8 ? 4 : 3;
-    slab(x, y, NODE_W, NODE_H, fill, border, 4);
+
+    if (sandbox.active) {
+      // Ghost style: no hard shadow, and a dashed outline drawn over the box,
+      // so a projected node can never be mistaken for a live measurement.
+      slab(x, y, NODE_W, NODE_H, fill, border, 0);
+      ctx.save();
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(x - border - 2.5, y - border - 2.5, NODE_W + border * 2 + 5, NODE_H + border * 2 + 5);
+      ctx.restore();
+    } else {
+      slab(x, y, NODE_W, NODE_H, fill, border, 4);
+    }
 
     // namespace identity tab
     px(x, y, 7, NODE_H, nsColor(n.ns, store.namespaces));
@@ -423,6 +460,14 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
     ctx.scale(viewScale, viewScale);
 
     hoverKey = mouse.x >= 0 ? hitTestNodes(nodes, mouse.x / viewScale, mouse.y / viewScale) : null;
+
+    if (sandbox.active) {
+      ctx.font = `9px ${PIXEL_FONT}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = INK_SOFT;
+      ctx.fillText('SANDBOX - PROJECTED, NOT MEASURED', 14, 8);
+    }
 
     // Entry marker, placed to the left of the proxy rather than above it: above
     // collides with the overload "!" badge exactly when the demo matters most.

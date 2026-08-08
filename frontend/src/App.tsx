@@ -1,8 +1,21 @@
 import { useEffect, useState } from 'react';
 import { PixelCanvas } from './PixelCanvas';
-import { nsColor } from './renderer';
+import { ENTRY_KEY, nsColor } from './renderer';
 import { connect, onStatus, onTopology, store } from './store';
-import { aggregateServices, neighborsOf, type ServiceNode } from './topology';
+import {
+  aggregateServices,
+  getObservedEdges,
+  neighborsOf,
+  type ServiceNode,
+} from './topology';
+import {
+  enterSandbox,
+  exitSandbox,
+  project,
+  replicasOf,
+  sandbox,
+  setReplicas,
+} from './sandbox';
 import './App.css';
 
 const WS_URL = `ws://${window.location.hostname}:8090/ws`;
@@ -29,6 +42,13 @@ export default function App() {
   const [level, setLevel] = useState<Level>('idle');
   const [showKube, setShowKube] = useState(false);
   const [stats, setStats] = useState({ services: 0, pods: 0, overloaded: 0, flows: 0 });
+  const [sandboxOn, setSandboxOn] = useState(false);
+  const [rpsInput, setRpsInput] = useState('200');
+  const [running, setRunning] = useState(false);
+  // Bumped whenever a stepper changes so the panel re-reads the projection.
+  const [edit, setEdit] = useState(0);
+  const [bottlenecks, setBottlenecks] = useState<string[]>([]);
+
   type Link = { name: string; hidden: boolean };
   const [links, setLinks] = useState<{ upstream: Link[]; downstream: Link[] }>({
     upstream: [],
@@ -48,7 +68,20 @@ export default function App() {
   useEffect(() => {
     const id = window.setInterval(() => {
       const thresh = store.overloadCfg.cpuPct || 200;
-      const svc = aggregateServices([...store.pods.values()], thresh, showKube);
+      let svc: Map<string, ServiceNode>;
+      if (sandbox.active) {
+        // Same projection the renderer draws, so the panel and the canvas can
+        // never disagree about a projected number.
+        const p = project(thresh, ENTRY_KEY);
+        svc = p.nodes;
+        setBottlenecks((prev) =>
+          prev.length === p.bottlenecks.length && prev.every((v, i) => v === p.bottlenecks[i])
+            ? prev
+            : p.bottlenecks,
+        );
+      } else {
+        svc = aggregateServices([...store.pods.values()], thresh, showKube);
+      }
 
       let overloaded = 0;
       let flows = 0;
@@ -89,7 +122,7 @@ export default function App() {
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, [selected, showKube]);
+  }, [selected, showKube, sandboxOn, running, edit]);
 
   const cfg = store.overloadCfg;
   const ratio = detail && detail.cpuPct >= 0 ? detail.cpuPct / (cfg.cpuPct || 200) : 0;
@@ -123,6 +156,27 @@ export default function App() {
           >
             kube-system {showKube ? 'ON' : 'OFF'}
           </button>
+          <button
+            className={`toggle sandbox-btn${sandboxOn ? ' on' : ''}`}
+            onClick={() => {
+              if (sandboxOn) {
+                exitSandbox();
+                setSandboxOn(false);
+                setRunning(false);
+                setBottlenecks([]);
+              } else {
+                const thresh = store.overloadCfg.cpuPct || 200;
+                enterSandbox(
+                  aggregateServices([...store.pods.values()], thresh, showKube),
+                  getObservedEdges(),
+                );
+                setSandboxOn(true);
+              }
+              setEdit((v) => v + 1);
+            }}
+          >
+            {sandboxOn ? 'BACK TO LIVE' : 'SANDBOX'}
+          </button>
         </div>
 
         <div className="right">
@@ -148,7 +202,43 @@ export default function App() {
           <span className="muted">signal</span> <b>{cfg.signal}</b>
           <span className="muted">≥ {cfg.cpuPct}% of CPU request</span>
         </span>
-        <span className="hint">edges appear only after Hubble observes real traffic · click a service to isolate its connections →</span>
+        {sandboxOn ? (
+          <span className="sandbox-load">
+            <span className="muted">synthetic load</span>
+            <input
+              className="rps"
+              type="number"
+              min="0"
+              step="50"
+              value={rpsInput}
+              onChange={(e) => setRpsInput(e.target.value)}
+              aria-label="target requests per second"
+            />
+            <span className="muted">req/s</span>
+            <button
+              className={`toggle${running ? ' on' : ''}`}
+              onClick={() => {
+                if (running) {
+                  sandbox.testRps = 0;
+                  setRunning(false);
+                } else {
+                  sandbox.testRps = Math.max(0, Number(rpsInput) || 0);
+                  setRunning(true);
+                }
+                setEdit((v) => v + 1);
+              }}
+            >
+              {running ? 'STOP' : 'RUN TEST LOAD'}
+            </button>
+            {bottlenecks.length > 0 && (
+              <span className="bottleneck">
+                bottleneck: {bottlenecks.map((k) => k.split('/')[1]).join(', ')}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="hint">edges appear only after Hubble observes real traffic · click a service to isolate its connections →</span>
+        )}
       </div>
 
       <main className="stage">
@@ -159,6 +249,7 @@ export default function App() {
             <div className="panel-head">
               <span className="swatch" style={{ background: nsColor(detail.ns, namespaces) }} />
               <strong>{detail.name}</strong>
+              {sandboxOn && <span className="ghost-tag">projected</span>}
               <button className="close" onClick={() => setSelected(null)} aria-label="Close">
                 x
               </button>
@@ -211,9 +302,37 @@ export default function App() {
               </dd>
             </dl>
 
+            {sandboxOn && (
+              <div className="stepper-row">
+                <span className="stepper-label">replicas</span>
+                <button
+                  className="step"
+                  onClick={() => {
+                    setReplicas(detail.key, replicasOf(detail.key) - 1);
+                    setEdit((v) => v + 1);
+                  }}
+                >
+                  -
+                </button>
+                <span className="step-value mono">{replicasOf(detail.key)}</span>
+                <button
+                  className="step"
+                  onClick={() => {
+                    setReplicas(detail.key, replicasOf(detail.key) + 1);
+                    setEdit((v) => v + 1);
+                  }}
+                >
+                  +
+                </button>
+                <span className="muted step-note">
+                  projected {detail.cpuPct >= 0 ? `${Math.round(detail.cpuPct)}%` : 'n/a'}
+                </span>
+              </div>
+            )}
+
             <div className="replicas">
               <div className="replicas-head">
-                replicas ({detail.replicas})
+                {sandboxOn ? 'replicas at snapshot' : `replicas (${detail.replicas})`}
               </div>
               {detail.pods.map((p) => (
                 <div className={`replica${p.overload ? ' over' : ''}`} key={p.key}>

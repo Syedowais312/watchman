@@ -111,6 +111,23 @@ export interface ServiceEdge {
   rate: number;
 }
 
+/**
+ * The single definition of "how loaded is this, relative to the threshold".
+ *
+ * Extracted so the live path, the sandbox replica projection and the synthetic
+ * load model all decide colour and overload through the exact same comparison
+ * rather than three lookalike inline expressions that can drift apart.
+ * Returns 0 when CPU% is undefined (-1), i.e. no CPU request set.
+ */
+export function loadRatio(cpuPct: number, thresholdPct: number): number {
+  if (cpuPct < 0 || thresholdPct <= 0) return 0;
+  return cpuPct / thresholdPct;
+}
+
+export function isOverloaded(cpuPct: number, thresholdPct: number): boolean {
+  return cpuPct >= 0 && cpuPct >= thresholdPct;
+}
+
 export function serviceKeyOf(p: PodView): string {
   return p.ns + '/' + p.component;
 }
@@ -164,7 +181,7 @@ export function aggregateServices(
   for (const n of out.values()) {
     n.cpuPct = n.cpuReqMilli > 0 ? (n.cpuMilli / n.cpuReqMilli) * 100 : -1;
     // Judge the service on its aggregate load, not on one noisy replica.
-    n.overload = n.cpuPct >= 0 && n.cpuPct >= thresholdPct;
+    n.overload = isOverloaded(n.cpuPct, thresholdPct);
     n.pods.sort((a, b) => a.name.localeCompare(b.name));
   }
 

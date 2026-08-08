@@ -62,10 +62,16 @@ components:
     resources:
       requests:
         cpu: 50m
+  # Go services whose chart-default 20Mi memory limit sits only 4Mi above the
+  # 16MiB GOMEMLIMIT soft target. Under load the GC can't get the heap back
+  # under the soft limit, so it spins at 100% CPU forever after load-stop
+  # (and OOM-restarts during it). A real hard limit gives the GC room to settle.
   product-catalog:
     resources:
       requests:
         cpu: 50m
+      limits:
+        memory: 128Mi
   recommendation:
     resources:
       requests:
@@ -82,10 +88,14 @@ components:
     resources:
       requests:
         cpu: 50m
+      limits:
+        memory: 128Mi
   shipping:
     resources:
       requests:
         cpu: 50m
+      limits:
+        memory: 128Mi
   quote:
     resources:
       requests:
