@@ -181,12 +181,22 @@ OTel Demo chart 0.41.0 (app 3.0.0), k6 2.1.0, Helm 3.21.3, Go 1.26.
 - **`kind load docker-image` fails** on Docker 29's containerd image store with
   `content digest ... not found`. Workaround used throughout:
   `docker save --platform linux/amd64 <img> -o x.tar && kind load image-archive x.tar`.
-- **k6 cannot run from a file path in-cluster** here:
-  `fs.inotify.max_user_instances=128` (kind recommends 512) is already exhausted,
-  so k6 dies at startup with `failed to create fsnotify watcher: too many open
-  files`. The Job pipes the script in on **stdin**, which skips the watcher and
-  needs no sysctl change. To raise it properly instead:
-  `sudo sysctl -w fs.inotify.max_user_instances=512`.
+- **k6 sometimes dies at startup** with `failed to create fsnotify watcher: too
+  many open files`. This host has `fs.inotify.max_user_instances=128` (kind
+  recommends 512) and a busy desktop session already consumes most of it, so
+  whether k6 starts depends on what else is running at that moment — it is
+  intermittent, not deterministic.
+
+  Piping the script in on stdin (which the Job does) does **not** avoid this:
+  k6 creates the watcher regardless. The real fix is one command:
+
+  ```bash
+  sudo sysctl -w fs.inotify.max_user_instances=512     # persist in /etc/sysctl.d/
+  ```
+
+  `run-load.sh` detects this failure and says so, because the dangerous
+  version of this bug is the silent one: the ramp dies, nothing lights up, and
+  the demo just looks unimpressive rather than broken.
 - **Don't drive load through `kubectl port-forward`.** It's a single-process TCP
   proxy: at 60 VUs it dropped **18% of requests** and the load never reached the
   backends, so nothing lit up. In-cluster, 5 VUs alone sustain ~426 req/s at 0%

@@ -269,3 +269,54 @@ body {
 .toggle:active { transform: translate(3px, 3px); box-shadow: none; }
 
 .panel dd.small { font-size: 10px; white-space: pre-line; line-height: 1.35; }
+
+/* Per-replica breakdown in the inspect panel. A service node aggregates its
+   replicas, so this is where the individual pods stay visible. */
+.replicas {
+  margin: 12px 14px 0;
+  border-top: 3px solid var(--ink);
+  padding-top: 10px;
+}
+
+.replicas-head {
+  font-family: var(--pixel);
+  font-size: 8px;
+  margin-bottom: 8px;
+}
+
+.replica {
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  background: var(--cream);
+  padding: 6px 8px;
+  margin-bottom: 9px;
+}
+
+.replica.over {
+  background: var(--critical);
+  color: #fff;
+}
+
+.replica-name {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  margin-bottom: 3px;
+}
+
+.replica-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.replica.over .replica-meta { color: #ffe0e0; }
+
+.replica-warn {
+  margin-top: 4px;
+  font-size: 9px;
+  font-family: var(--pixel);
+  color: var(--critical);
+}
+.replica.over .replica-warn { color: #fff; }

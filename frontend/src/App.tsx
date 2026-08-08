@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { PixelCanvas } from './PixelCanvas';
 import { nsColor } from './renderer';
 import { connect, onStatus, onTopology, store } from './store';
-import { aggregateServices, type ServiceNode } from './topology';
+import { aggregateServices, neighborsOf, type ServiceNode } from './topology';
 import './App.css';
 
 const WS_URL = `ws://${window.location.hostname}:8090/ws`;
@@ -28,7 +28,12 @@ export default function App() {
   const [detail, setDetail] = useState<ServiceNode | null>(null);
   const [level, setLevel] = useState<Level>('idle');
   const [showKube, setShowKube] = useState(false);
-  const [stats, setStats] = useState({ services: 0, overloaded: 0, flows: 0, edges: 0 });
+  const [stats, setStats] = useState({ services: 0, pods: 0, overloaded: 0, flows: 0 });
+  type Link = { name: string; hidden: boolean };
+  const [links, setLinks] = useState<{ upstream: Link[]; downstream: Link[] }>({
+    upstream: [],
+    downstream: [],
+  });
 
   useEffect(() => {
     connect(WS_URL);
@@ -53,12 +58,15 @@ export default function App() {
       }
       const next = {
         services: svc.size,
+        // Pod count is the sum of replicas actually on screen, so it tracks the
+        // kube-system toggle rather than reporting everything the aggregator sees.
+        pods: [...svc.values()].reduce((t, x) => t + x.replicas, 0),
         overloaded,
         flows: Math.round(flows),
-        edges: 0,
       };
       setStats((prev) =>
         prev.services === next.services &&
+        prev.pods === next.pods &&
         prev.overloaded === next.overloaded &&
         prev.flows === next.flows
           ? prev
@@ -69,6 +77,16 @@ export default function App() {
         return prev === l ? prev : l;
       });
       setDetail(selected ? svc.get(selected) ?? null : null);
+      if (selected) {
+        // A neighbour can be real but not drawn (e.g. kube-dns while
+        // kube-system is toggled off). Mark those rather than hiding a genuine
+        // dependency or implying it has a box on screen.
+        const toLink = (k: string): Link => ({ name: k.split('/')[1], hidden: !svc.has(k) });
+        const n = neighborsOf(selected);
+        setLinks({ upstream: n.upstream.map(toLink), downstream: n.downstream.map(toLink) });
+      } else {
+        setLinks({ upstream: [], downstream: [] });
+      }
     }, 250);
     return () => window.clearInterval(id);
   }, [selected, showKube]);
@@ -121,6 +139,7 @@ export default function App() {
 
       <div className="statbar">
         <span className="stat"><b>{stats.services}</b> <span className="muted">services</span></span>
+        <span className="stat"><b>{stats.pods}</b> <span className="muted">pods</span></span>
         <span className={`stat${stats.overloaded > 0 ? ' alarm' : ''}`}>
           <b>{stats.overloaded}</b> <span className="muted">overloaded</span>
         </span>
@@ -129,7 +148,7 @@ export default function App() {
           <span className="muted">signal</span> <b>{cfg.signal}</b>
           <span className="muted">≥ {cfg.cpuPct}% of CPU request</span>
         </span>
-        <span className="hint">edges appear only after Hubble observes real traffic · click a service →</span>
+        <span className="hint">edges appear only after Hubble observes real traffic · click a service to isolate its connections →</span>
       </div>
 
       <main className="stage">
@@ -178,11 +197,45 @@ export default function App() {
               <dt>memory</dt><dd className="mono">{(detail.memBytes / 1048576).toFixed(0)} MiB</dd>
               <dt>flows in</dt><dd className="mono">{detail.rxRate.toFixed(1)}/s</dd>
               <dt>flows out</dt><dd className="mono">{detail.txRate.toFixed(1)}/s</dd>
-              <dt>pods</dt>
-              <dd className="mono wrap small">{detail.pods.join('\n')}</dd>
+              <dt>calls</dt>
+              <dd className="mono wrap small">
+                {links.downstream.length
+                  ? links.downstream.map((l) => l.name + (l.hidden ? '*' : '')).join(', ')
+                  : 'nothing observed'}
+              </dd>
+              <dt>called by</dt>
+              <dd className="mono wrap small">
+                {links.upstream.length
+                  ? links.upstream.map((l) => l.name + (l.hidden ? '*' : '')).join(', ')
+                  : 'nothing observed'}
+              </dd>
             </dl>
 
+            <div className="replicas">
+              <div className="replicas-head">
+                replicas ({detail.replicas})
+              </div>
+              {detail.pods.map((p) => (
+                <div className={`replica${p.overload ? ' over' : ''}`} key={p.key}>
+                  <div className="replica-name mono">{p.name}</div>
+                  <div className="replica-meta">
+                    <span>{p.node || 'unscheduled'}</span>
+                    <span className="mono">
+                      {p.cpuMilli}m
+                      {p.cpuPct >= 0 ? ` · ${Math.round(p.cpuPct)}%` : ' · n/a'}
+                    </span>
+                    <span className="mono">{(p.memBytes / 1048576).toFixed(0)} MiB</span>
+                  </div>
+                  {!p.ready && <div className="replica-warn">not ready</div>}
+                </div>
+              ))}
+            </div>
+
             <p className="foot">
+              {[...links.upstream, ...links.downstream].some((l) => l.hidden) && (
+                <>* hidden namespace — use the kube-system toggle to show it.<br /></>
+              )}
+              Connections are what Hubble actually observed, not a static config.
               Aggregated across {detail.replicas} replica{detail.replicas === 1 ? '' : 's'}.
               Rates are Hubble traced flow events, not application requests — pooled
               gRPC connections serve many requests per traced flow.

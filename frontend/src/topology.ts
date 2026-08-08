@@ -97,7 +97,9 @@ export interface ServiceNode {
   overload: boolean;
   /** True when at least one replica is individually over the threshold. */
   anyReplicaOverload: boolean;
-  pods: string[];
+  /** The individual replicas, kept whole so the inspect panel can show
+   * per-replica CPU/memory/node rather than just a list of names. */
+  pods: PodView[];
   nodes: string[];
   x: number;
   y: number;
@@ -155,7 +157,7 @@ export function aggregateServices(
     n.rxRate += p.rxRate;
     n.txRate += p.txRate;
     if (p.overload) n.anyReplicaOverload = true;
-    n.pods.push(p.name);
+    n.pods.push(p);
     if (p.node && !n.nodes.includes(p.node)) n.nodes.push(p.node);
   }
 
@@ -163,7 +165,7 @@ export function aggregateServices(
     n.cpuPct = n.cpuReqMilli > 0 ? (n.cpuMilli / n.cpuReqMilli) * 100 : -1;
     // Judge the service on its aggregate load, not on one noisy replica.
     n.overload = n.cpuPct >= 0 && n.cpuPct >= thresholdPct;
-    n.pods.sort();
+    n.pods.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   return out;
@@ -204,6 +206,20 @@ export function updateEdges(podEdges: EdgeView[], podToService: Map<string, stri
 
 export function getObservedEdges(): ServiceEdge[] {
   return [...observedEdges.values()];
+}
+
+/** Services this one calls (downstream) and that call it (upstream). */
+export function neighborsOf(key: string): { upstream: string[]; downstream: string[] } {
+  const up = new Set<string>();
+  const down = new Set<string>();
+  for (const e of observedEdges.values()) {
+    if (e.src === key) down.add(e.dst);
+    if (e.dst === key) up.add(e.src);
+  }
+  return {
+    upstream: [...up].sort(),
+    downstream: [...down].sort(),
+  };
 }
 
 /** Drops edges whose endpoints are no longer on screen (e.g. kube-system hidden). */

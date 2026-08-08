@@ -5,6 +5,7 @@ import {
   hitTestNodes,
   NODE_H,
   NODE_W,
+  neighborsOf,
   serviceKeyOf,
   updateEdges,
   visibleEdges,
@@ -73,6 +74,7 @@ interface Packet {
   t: number;
   dur: number;
   color: string;
+  src: string;
   dst: string;
 }
 
@@ -125,6 +127,9 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
     px(x, y, w, h, fill);
   };
 
+  /** Selected node plus everything it talks to, for the highlight pass. */
+  let relatedNodes = new Set<string>();
+
   function rebuild() {
     const thresh = store.overloadCfg.cpuPct || 200;
     nodes = aggregateServices([...store.pods.values()], thresh, showKubeSystem);
@@ -132,6 +137,14 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
     const podToService = new Map<string, string>();
     for (const p of store.pods.values()) podToService.set(p.key, serviceKeyOf(p));
     updateEdges(store.edges, podToService);
+
+    relatedNodes = new Set<string>();
+    if (selected) {
+      relatedNodes.add(selected);
+      const { upstream, downstream } = neighborsOf(selected);
+      for (const k of upstream) relatedNodes.add(k);
+      for (const k of downstream) relatedNodes.add(k);
+    }
   }
 
   function addParticle(p: Particle) {
@@ -139,6 +152,29 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
   }
 
   const centre = (n: ServiceNode) => ({ x: n.x + NODE_W / 2, y: n.y + NODE_H / 2 });
+
+  /**
+   * Where a ray from a node's centre toward (tx, ty) crosses that node's border.
+   *
+   * Edges are clipped to this instead of being drawn centre-to-centre, so lines
+   * stop at the box edge rather than running through the box, and an arrowhead
+   * lands on the border at any angle. A fixed NODE_W/2 setback only ever looked
+   * right on perfectly horizontal edges.
+   */
+  function borderPoint(n: ServiceNode, tx: number, ty: number) {
+    const c = centre(n);
+    const dx = tx - c.x;
+    const dy = ty - c.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (adx < 1e-6 && ady < 1e-6) return c;
+    // Scale the ray until it hits whichever side it reaches first.
+    const t = Math.min(
+      adx > 1e-6 ? NODE_W / 2 / adx : Infinity,
+      ady > 1e-6 ? NODE_H / 2 / ady : Infinity,
+    );
+    return { x: c.x + dx * t, y: c.y + dy * t };
+  }
 
   function spawnPackets(dt: number) {
     for (const e of visibleEdges(nodes)) {
@@ -153,57 +189,92 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
       let n = Math.floor(carry);
       spawnCarry.set(k, carry - n);
 
-      const ca = centre(a);
-      const cb = centre(b);
+      const g = edgeGeometry(a, b);
       const color = nsColor(a.ns, store.namespaces);
 
       while (n-- > 0 && packets.length < MAX_PACKETS) {
-        const dist = Math.hypot(cb.x - ca.x, cb.y - ca.y) || 1;
         packets.push({
-          ax: ca.x, ay: ca.y,
-          bx: cb.x, by: cb.y,
+          ax: g.sx, ay: g.sy,
+          bx: g.tipX, by: g.tipY,
           t: 0,
-          dur: Math.max(0.4, dist / 320),
+          dur: Math.max(0.4, g.len / 320),
           color,
+          src: e.src,
           dst: e.dst,
         });
       }
     }
   }
 
+  const ARROW = 9; // arrowhead length
+  const GAP = 4; // breathing room between a box border and the line
+
+  /** Endpoints of an edge, clipped to both boxes' borders. */
+  function edgeGeometry(a: ServiceNode, b: ServiceNode) {
+    const ca = centre(a);
+    const cb = centre(b);
+    const from = borderPoint(a, cb.x, cb.y);
+    const to = borderPoint(b, ca.x, ca.y);
+
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+
+    // Pull both ends in so the line doesn't touch either border.
+    const sx = from.x + ux * GAP;
+    const sy = from.y + uy * GAP;
+    const tipX = to.x - ux * GAP;
+    const tipY = to.y - uy * GAP;
+
+    return { sx, sy, tipX, tipY, ux, uy, len };
+  }
+
   function drawEdges() {
     for (const e of visibleEdges(nodes)) {
       const a = nodes.get(e.src)!;
       const b = nodes.get(e.dst)!;
-      const ca = centre(a);
-      const cb = centre(b);
+      const g = edgeGeometry(a, b);
+      // Boxes overlapping or adjacent: nothing sensible to draw.
+      if (g.len < ARROW + GAP * 2) continue;
 
-      // A persistent thin line: this pair has carried real observed traffic at
-      // some point. Alpha rises with the current rate so live routes read
-      // stronger without idle ones vanishing.
       const live = e.rate > 0;
-      ctx.strokeStyle = live
-        ? `rgba(20,17,12,${Math.min(0.5, 0.2 + e.rate * 0.03)})`
-        : 'rgba(20,17,12,0.13)';
-      ctx.lineWidth = live ? 2 : 1;
+      const related = !selected || e.src === selected || e.dst === selected;
+
+      // When something is selected, everything unrelated recedes so the
+      // selection's own connections are the only thing left to read.
+      let alpha: number;
+      let width: number;
+      if (!selected) {
+        alpha = live ? Math.min(0.55, 0.22 + e.rate * 0.03) : 0.14;
+        width = live ? 2 : 1;
+      } else if (related) {
+        alpha = 0.95;
+        width = 3;
+      } else {
+        alpha = 0.06;
+        width = 1;
+      }
+
+      // Stop the line short of the arrowhead so they don't overdraw.
+      const lineEndX = g.tipX - g.ux * ARROW;
+      const lineEndY = g.tipY - g.uy * ARROW;
+
+      ctx.strokeStyle = `rgba(20,17,12,${alpha})`;
+      ctx.lineWidth = width;
       ctx.beginPath();
-      ctx.moveTo(ca.x, ca.y);
-      ctx.lineTo(cb.x, cb.y);
+      ctx.moveTo(g.sx, g.sy);
+      ctx.lineTo(lineEndX, lineEndY);
       ctx.stroke();
 
-      // Direction arrow, set back from the target so the block doesn't hide it.
-      const dx = cb.x - ca.x;
-      const dy = cb.y - ca.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len;
-      const uy = dy / len;
-      const tipX = cb.x - ux * (NODE_W / 2 + 6);
-      const tipY = cb.y - uy * (NODE_H / 2 + 2);
-      ctx.fillStyle = live ? 'rgba(20,17,12,0.75)' : 'rgba(20,17,12,0.25)';
+      // Arrowhead, tip exactly on the destination border.
+      const halfW = related && selected ? 5 : 4;
+      ctx.fillStyle = `rgba(20,17,12,${alpha})`;
       ctx.beginPath();
-      ctx.moveTo(tipX, tipY);
-      ctx.lineTo(tipX - ux * 7 - uy * 4, tipY - uy * 7 + ux * 4);
-      ctx.lineTo(tipX - ux * 7 + uy * 4, tipY - uy * 7 - ux * 4);
+      ctx.moveTo(g.tipX, g.tipY);
+      ctx.lineTo(lineEndX - g.uy * halfW, lineEndY + g.ux * halfW);
+      ctx.lineTo(lineEndX + g.uy * halfW, lineEndY - g.ux * halfW);
       ctx.closePath();
       ctx.fill();
     }
@@ -385,8 +456,12 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
       }
       const x = q.ax + (q.bx - q.ax) * q.t;
       const y = q.ay + (q.by - q.ay) * q.t;
+      // With a selection active, traffic on unrelated edges recedes.
+      const onSelected = !selected || q.src === selected || q.dst === selected;
+      ctx.globalAlpha = onSelected ? 1 : 0.12;
       px(x - 4, y - 4, 8, 8, INK);
       px(x - 2, y - 2, 4, 4, q.color);
+      ctx.globalAlpha = 1;
     }
 
     for (let i = particles.length - 1; i >= 0; i--) {
@@ -410,7 +485,12 @@ export function startRenderer(canvas: HTMLCanvasElement): RendererHandle {
       else bump.set(k, nv);
     }
 
-    for (const n of nodes.values()) drawNode(n, now);
+    for (const n of nodes.values()) {
+      const dimmed = selected !== null && !relatedNodes.has(n.key);
+      ctx.globalAlpha = dimmed ? 0.3 : 1;
+      drawNode(n, now);
+      ctx.globalAlpha = 1;
+    }
 
     raf = requestAnimationFrame(frame);
   }
